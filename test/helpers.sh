@@ -114,129 +114,73 @@ make_empty_commit() {
   git -C $repo rev-parse HEAD
 }
 
-check_uri() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
+check() {
+
+  local addition=""
+  local arg=""
+  local json="{}"
+
+  while (( "$#" )); do
+
+    arg=$1 ; shift
+    addition=""
+    case $arg in
+      "uri" )
+        addition="$(jq -n "{
+          source: {
+            uri: $(echo $1 | jq -R .)
+          }
+        }")"
+        shift;;
+
+      "key" )
+        addition="$(jq -n "{
+          source: {
+            private_key: $(cat $1 | jq -s -R .)
+          }
+        }")"
+        shift;;
+
+      "ignore_paths" )
+        addition="$(jq -n "{
+          source: {
+            ignore_paths: $(echo $1 | jq -R '. | split(" ")')
+          }
+        }")"
+        shift;;
+
+      "paths" )
+        addition="$(jq -n "{
+          source: {
+            paths: $(echo $1 | jq -R '. | split(" ")')
+          }
+        }")"
+        shift;;
+
+      "from" )
+        addition="$(jq -n "{
+          version: {
+            ref: $(echo $1 | jq -R .)
+          }
+        }")"
+        shift;;
+
+      * )
+        echo -e '\e[31m'"Unknown argument '$arg'"'\e[0m' >&2
+        exit 1;;
+
+    esac
+
+    if [ "$addition" != "" ] ; then
+      json="$(echo $json $addition | jq -s '.[0] * .[1]')"
+    fi
+
+  done
+
+
+  echo $json | ${resource_dir}/check | tee /dev/stderr
 }
 
-
-check_uri_with_key() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .),
-      private_key: $(cat $2 | jq -s -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-
-check_uri_ignoring() {
-  local uri=$1
-
-  shift
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      ignore_paths: $(echo "$@" | jq -R '. | split(" ")')
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_paths() {
-  local uri=$1
-
-  shift
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      paths: $(echo "$@" | jq -R '. | split(" ")')
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_paths_ignoring() {
-  local uri=$1
-  local paths=$2
-
-  shift 2
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      paths: [$(echo $paths | jq -R .)],
-      ignore_paths: $(echo "$@" | jq -R '. | split(" ")')
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_from() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    },
-    version: {
-      ref: $(echo $2 | jq -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_from_ignoring() {
-  local uri=$1
-  local ref=$2
-
-  shift 2
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      ignore_paths: $(echo "$@" | jq -R '. | split(" ")')
-    },
-    version: {
-      ref: $(echo $ref | jq -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_from_paths() {
-  local uri=$1
-  local ref=$2
-
-  shift 2
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      paths: $(echo "$@" | jq -R '. | split(" ")')
-    },
-    version: {
-      ref: $(echo $ref | jq -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
-
-check_uri_from_paths_ignoring() {
-  local uri=$1
-  local ref=$2
-  local paths=$3
-
-  shift 3
-
-  jq -n "{
-    source: {
-      uri: $(echo $uri | jq -R .),
-      paths: [$(echo $paths | jq -R .)],
-      ignore_paths: $(echo "$@" | jq -R '. | split(" ")')
-    },
-    version: {
-      ref: $(echo $ref | jq -R .)
-    }
-  }" | ${resource_dir}/check | tee /dev/stderr
-}
 
 get_uri() {
   jq -n "{
