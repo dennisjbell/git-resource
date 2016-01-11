@@ -4,15 +4,19 @@ set -e -u
 
 set -o pipefail
 
+
 resource_dir=/opt/resource
 
 run() {
   export TMPDIR=$(mktemp -d ${TMPDIR_ROOT}/git-tests.XXXXXX)
 
-  echo -e 'running \e[33m'"$@"$'\e[0m...'
+  echo -e 'running \e[33m'"$@"'\e[0m...'
   eval "$@" 2>&1 | sed -e 's/^/  /g'
+  echo -e '\e[32m'"$@ passed!"'\e[0m'
+  echo ""
   echo ""
 }
+
 
 init_repo() {
   (
