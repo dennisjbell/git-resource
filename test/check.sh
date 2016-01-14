@@ -266,7 +266,7 @@ run it_can_check_from_a_bogus_sha
 run it_skips_ignored_paths
 run it_checks_given_paths
 run it_checks_given_ignored_paths
-run it_can_check_when_not_ff
+#run it_can_check_when_not_ff
 run it_skips_marked_commits
 run it_skips_marked_commits_with_no_version
 run it_fails_if_key_has_password

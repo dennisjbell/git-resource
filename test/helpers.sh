@@ -165,6 +165,30 @@ check() {
         }")"
         shift;;
 
+      "branches" )
+        addition="$(jq -n "{
+          source: {
+            branches: $(echo "$1" | jq -R '.')
+          }
+        }")"
+        shift;;
+
+      "ignore_branches" )
+        addition="$(jq -n "{
+          source: {
+            ignore_branches: $(echo "$1" | jq -R '.')
+          }
+        }")"
+        shift;;
+
+#      "from_branches" )
+#        addition="$(jq -n "{
+#          version: {
+#            ref: $(echo $1 | jq -R .)
+#          }
+#        }")"
+#        shift;;
+#
       * )
         echo -e '\e[31m'"Unknown argument '$arg'"'\e[0m' >&2
         exit 1;;

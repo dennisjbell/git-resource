@@ -12,6 +12,7 @@ source $(dirname $0)/common.sh
 PATH=/usr/local/bin:$PATH
 
 payload=$TMPDIR/git-resource-request
+destination=$TMPDIR/git-resource-repo-cache
 
 cat > $payload <&0
 
@@ -20,39 +21,154 @@ configure_git_ssl_verification $payload
 
 uri=$(jq -r '.source.uri // ""' < $payload)
 branch=$(jq -r '.source.branch // ""' < $payload)
+branches=$(jq -r '.source.branches // ""' < $payload)
+ignore_branches=$(jq -r '.source.ignore_branches // ""' < $payload)
 paths="$(jq -r '(.source.paths // ["."])[]' < $payload)" # those "'s are important
 ignore_paths="$(jq -r '":!" + (.source.ignore_paths // [])[]' < $payload)" # these ones too
-ref=$(jq -r '.version.ref // ""' < $payload)
+last_refs=$(jq -r '.version.ref // ""' < $payload)
 
-destination=$TMPDIR/git-resource-repo-cache
+if [ -n "$branch" ] && [ -n "$branches" ] ; then
+  echo "ERROR: Cannot specify both branch and branches"
+fi
+
+# Support functions
+log_range() {
+  local ref=$1
+  if [ -n "$ref" ] && git cat-file -e "$ref" ; then
+    echo "--reverse ${ref}..HEAD"
+  else
+    echo "-1"
+  fi
+}
+
+paths_search() {
+  local paths="$1"
+  local ignore_paths="$2"
+  if [ "$paths" = '.' ] && [ -z "$ignore_paths" ] ; then
+    echo ""
+  else
+    echo "-- $paths $ignore_paths"
+  fi
+}
+
+filter_branches() {
+  local branch_refs="$(tr ' ' "\n")"
+  echo "1:$branch_refs" >&2
+
+  if [ -n "$branches" ] ; then
+    echo "Testing $branches" >&2
+    branch_refs="$(grep ":$branches$" <<< "$branch_refs")"
+  fi
+
+  if [ -n "$ignore_branches" ] ; then
+    echo "Rejecting $branches" >&2
+    branch_refs="$(grep -v ":$ignore_branches$" <<< "$branch_refs")"
+  fi
+
+  echo "$branch_refs"
+}
+
+get_refs() {
+  local ref="$1"
+  git log --grep '\[ci skip\]' --invert-grep --format='%H' $(log_range $ref) $(paths_search "$paths" "$ignore_paths")
+}
+
+get_branch_refs() {
+  local changed_branch=''
+  local last_branch_ref=''
+  local branch_and_ref
+  local branch_ref
+  local branch
+
+  # Get a list of all branches and their current ref
+  local current_branches="$( \
+     git branch -rv --no-abbrev | \
+       awk '{print $2 ":" $1}' | \
+       grep -e '^[0-9a-f]\{40\}:' | \
+       sort -t: -k1 | grep ":origin/" | \
+       sed -e 's/:origin\//:/' | \
+       filter_branches)"
+
+  echo "2: $current_branches" >&2
+
+  historic_branches="$(tr ' ' "\n" <<<$last_refs)"
+
+  # Find the first branch that has a different ref
+  while [ -n "$current_branches" ] ; do
+
+    read branch_and_ref current_branches <<< $current_branches
+    IFS=: read branch_ref branch <<< "$branch_and_ref"
+
+    # Find a candidate branch (new or changed)
+    if [[ "$historic_branches" =~ (^| )([0-9a-f]{40}):$branch( |$) ]] ; then
+      if [ "${BASH_REMATCH[2]}" != "$branch_ref" ] ; then
+        last_branch_ref="${BASH_REMATCH[2]}"
+        changed_branch="$branch"
+      fi
+    else
+      # Found a new branch, therefore it must have changed
+      changed_branch="$branch"
+    fi
+
+    # Check if candidate branch contains any acceptable commits
+    if [ -n "$changed_branch" ] ; then
+      git checkout $changed_branch >&2
+      results="$(get_refs $last_branch_ref)"
+      if [ -n "$results" ] ; then
+        # Branch contains valid candidate, remove it from the historic list, then all its delta releases to the front
+        historic_branches=$(grep -v "$last_branch_ref:$branch" <<< "$historic_branches" | tr "\n" " ")
+        awk '{print $1 ":" "'"$changed_branch"'" " " "'"$historic_branches"'" }' <<< "$results"
+        break
+      fi
+    fi
+  done
+}
+
+build_repo_dir() {
+  branchflag=""
+  if [ -z "$branches" ] ; then
+    branchflag="--single-branch"
+  fi
+  if [ -n "$branch" ]; then
+    branchflag="$branchflag --branch $branch"
+  fi
+  git clone $branchflag $uri $destination
+
+  cd $destination
+}
 
 if [ -d $destination ]; then
   cd $destination
-  git fetch
-  git reset --hard FETCH_HEAD
-else
-  branchflag=""
-  if [ -n "$branch" ]; then
-    branchflag="--branch $branch"
+  if [ -n "$branches" ] ; then
+    # Esure the existing repo has all the branches
+    if [ "$(git config --local --get remote.origin.fetch)" != "+refs/heads/\*:refs/remotes/origin/\*" ] ; then
+       git config --local --replace-all remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" ".*refs\/remotes\/origin\/.*"
+    fi
+    git fetch --all
+  else
+    if [ -z "$branch" ] ; then
+      ref="$(git symbolic-ref HEAD)"
+    else
+      ref="refs/heads/$branch"
+    fi
+    if [[ "$(git config --local --get remote.origin.fetch)" =~ "+$ref:refs/remotes/origin/.*" ]] ; then
+      git fetch
+      git reset --hard FETCH_HEAD
+    else
+      # We aren't looking at the correct single branch, so lets just start from scratch
+      cd ..
+      rm -rf $destination
+      build_repo_dir
+    fi
   fi
-
-  git clone --single-branch $uri $branchflag $destination
-  cd $destination
-fi
-
-if [ -n "$ref" ] && git cat-file -e "$ref"; then
-  log_range="--reverse ${ref}..HEAD"
 else
-  log_range="-1"
+  build_repo_dir
 fi
 
-if [ "$paths" = '.' ] && [ -z "$ignore_paths" ]; then
-  paths_search=""
+if [ -z "$branches" ] ; then
+  get_refs "$last_refs" | jq -R '.' | jq -s "map({ref: .})" >&3
 else
-  paths_search="-- $paths $ignore_paths"
+  get_branch_refs | jq -R '.' | jq -s "map({ref: .})" >&3
 fi
 
 
-{
-  git log --grep '\[ci skip\]' --invert-grep --format='%H' $log_range $paths_search
-} | jq -R '.' | jq -s "map({ref: .})" >&3
