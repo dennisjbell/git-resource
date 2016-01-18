@@ -19,12 +19,10 @@ on_exit() {
 
 trap on_exit EXIT
 
-#$(dirname $0)/check.sh
-#$(dirname $0)/get.sh
-#$(dirname $0)/put.sh
+$(dirname $0)/check.sh
 $(dirname $0)/check_multi.sh
-#$(dirname $0)/get.sh
-#$(dirname $0)/put.sh
+$(dirname $0)/get.sh
+$(dirname $0)/put.sh
 
-echo -e '\e[32;1m'"all tests passed!"'\e[0m'
+echo -e '\e[32;1m'"All tests passed!"'\e[0m'
 

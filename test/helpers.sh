@@ -48,6 +48,13 @@ init_repo() {
   )
 }
 
+remove_branch_from_repo () {
+  local repo=$1
+  local branch=$2
+  git -C $repo checkout ${3:-master}
+  git -C $repo branch -D $branch
+}
+
 init_repo_with_submodule() {
   local submodule=$(init_repo)
   make_commit $submodule >/dev/null
@@ -101,6 +108,10 @@ make_commit_to_be_skipped() {
   make_commit_to_file $1 some-file "[ci skip]"
 }
 
+make_commit_to_be_skipped_on_branch() {
+  make_commit_to_file_on_branch $1 some-file $2 "[ci skip]$3"
+}
+
 make_empty_commit() {
   local repo=$1
   local msg=${2-}
@@ -114,7 +125,7 @@ make_empty_commit() {
   git -C $repo rev-parse HEAD
 }
 
-check() {
+test_check() {
 
   local addition=""
   local arg=""
@@ -181,14 +192,6 @@ check() {
         }")"
         shift;;
 
-#      "from_branches" )
-#        addition="$(jq -n "{
-#          version: {
-#            ref: $(echo $1 | jq -R .)
-#          }
-#        }")"
-#        shift;;
-#
       * )
         echo -e '\e[31m'"Unknown argument '$arg'"'\e[0m' >&2
         exit 1;;
@@ -205,68 +208,88 @@ check() {
   echo $json | ${resource_dir}/check | tee /dev/stderr
 }
 
+test_get() {
+  local addition=""
+  local arg=""
+  local json="{}"
+  local destination
 
-get_uri() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    }
-  }" | ${resource_dir}/in "$2" | tee /dev/stderr
+  while (( "$#" )); do
+
+    arg=$1 ; shift
+    addition=""
+    case $arg in
+      "uri" )
+        addition="$(jq -n "{
+          source: {
+            uri: $(echo $1 | jq -R .)
+          }
+        }")"
+        shift;;
+
+      "depth" )
+        addition="$(jq -n "{
+          params: {
+            depth: $(echo $1 | jq -R .)
+          }
+        }")"
+        shift;;
+
+      "submodules" )
+        local submodules='"all"'
+        if [ "$1" != "all" ] ; then
+          submodules="[$(echo $1 | jq -R .)]"
+        fi
+        addition="$(jq -n "{
+          params: {
+            submodules: $submodules
+          }
+        }")"
+        shift;;
+
+      "ref" )
+        addition="$(jq -n "{
+          version: {
+            ref: $(echo $1 | jq -R .)
+          }
+        }")"
+        shift;;
+
+      "branch" )
+        addition="$(jq -n "{
+          source: {
+            branch: $(echo "$1" | jq -R '.')
+          }
+        }")"
+        shift;;
+
+      * )
+        if [ -z ${destination+is_set} ] ; then
+          destination=$arg
+        else
+          echo -e '\e[31m'"Unknown argument '$arg'"'\e[0m' >&2
+          exit 1
+        fi
+        ;;
+
+    esac
+
+    if [ "$addition" != "" ] ; then
+      json="$(echo $json $addition | jq -s '.[0] * .[1]')"
+    fi
+
+  done
+
+  if [ -z ${destination+is_set} ] ; then
+    echo -e '\e[31m'"ERROR: destination not specified for test_get"'\e[0m' >&2
+    exit 1
+  fi
+
+  echo $json | ${resource_dir}/in $destination | tee /dev/stderr
 }
 
-get_uri_at_depth() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    },
-    params: {
-      depth: $(echo $2 | jq -R .)
-    }
-  }" | ${resource_dir}/in "$3" | tee /dev/stderr
-}
-
-get_uri_with_submodules_at_depth() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    },
-    params: {
-      depth: $(echo $2 | jq -R .),
-      submodules: [$(echo $3 | jq -R .)],
-    }
-  }" | ${resource_dir}/in "$4" | tee /dev/stderr
-}
-
-get_uri_with_submodules_all() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    },
-    params: {
-      depth: $(echo $2 | jq -R .),
-      submodules: \"all\",
-    }
-  }" | ${resource_dir}/in "$3" | tee /dev/stderr
-}
-
-get_uri_at_ref() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .)
-    },
-    version: {
-      ref: $(echo $2 | jq -R .)
-    }
-  }" | ${resource_dir}/in "$3" | tee /dev/stderr
-}
-
-get_uri_at_branch() {
-  jq -n "{
-    source: {
-      uri: $(echo $1 | jq -R .),
-      branch: $(echo $2 | jq -R .)
-    }
-  }" | ${resource_dir}/in "$3" | tee /dev/stderr
+test_put() {
+  echo ''
 }
 
 put_uri() {

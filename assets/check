@@ -32,6 +32,7 @@ if [ -n "$branch" ] && [ -n "$branches" ] ; then
 fi
 
 # Support functions
+
 log_range() {
   local ref=$1
   if [ -n "$ref" ] && git cat-file -e "$ref" ; then
@@ -53,15 +54,12 @@ paths_search() {
 
 filter_branches() {
   local branch_refs="$(tr ' ' "\n")"
-  echo "1:$branch_refs" >&2
 
   if [ -n "$branches" ] ; then
-    echo "Testing $branches" >&2
     branch_refs="$(grep ":$branches$" <<< "$branch_refs")"
   fi
 
   if [ -n "$ignore_branches" ] ; then
-    echo "Rejecting $branches" >&2
     branch_refs="$(grep -v ":$ignore_branches$" <<< "$branch_refs")"
   fi
 
@@ -89,10 +87,6 @@ get_branch_refs() {
        sed -e 's/:origin\//:/' | \
        filter_branches)"
 
-  echo "2: $current_branches" >&2
-
-  historic_branches="$(tr ' ' "\n" <<<$last_refs)"
-
   # Find the first branch that has a different ref
   while [ -n "$current_branches" ] ; do
 
@@ -100,7 +94,7 @@ get_branch_refs() {
     IFS=: read branch_ref branch <<< "$branch_and_ref"
 
     # Find a candidate branch (new or changed)
-    if [[ "$historic_branches" =~ (^| )([0-9a-f]{40}):$branch( |$) ]] ; then
+    if [[ "$last_refs" =~ (^| )([0-9a-f]{40}):$branch( |$) ]] ; then
       if [ "${BASH_REMATCH[2]}" != "$branch_ref" ] ; then
         last_branch_ref="${BASH_REMATCH[2]}"
         changed_branch="$branch"
@@ -116,8 +110,9 @@ get_branch_refs() {
       results="$(get_refs $last_branch_ref)"
       if [ -n "$results" ] ; then
         # Branch contains valid candidate, remove it from the historic list, then all its delta releases to the front
-        historic_branches=$(grep -v "$last_branch_ref:$branch" <<< "$historic_branches" | tr "\n" " ")
-        awk '{print $1 ":" "'"$changed_branch"'" " " "'"$historic_branches"'" }' <<< "$results"
+        read remaining_branches <<< $(tr " " "\n" <<<$last_refs | grep -v "$last_branch_ref:$branch")
+        if [ -n "$remaining_branches" ] ; then remaining_branches=" $remaining_branches" ; fi
+        awk '{print $1 ":" "'"$changed_branch"'" "'"$remaining_branches"'" }' <<< "$results"
         break
       fi
     fi
